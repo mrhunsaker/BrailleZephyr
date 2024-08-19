@@ -1,191 +1,146 @@
-/* Copyright (C) 2015 American Printing House for the Blind Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath("net.java.dev.jna:jna:5.14.0") // Ensure compatibility with Java 17
+    }
+}
+
+import com.sun.jna.Platform as JnaPlatform
+import org.panteleyev.jpackage.ImageType
 
 plugins {
-	id 'java'
-	id 'application'
-	id "org.beryx.jlink" version "2.14.0"
+    id "java"
+    id "application"
+    id "maven-publish"
+    id "org.panteleyev.jpackageplugin" version "1.7.0" // Updated to the latest version that supports Java 17
 }
 
-sourceCompatibility = '9'
-targetCompatibility = '9'
-
-group = 'org.aph.braillezephyr'
-version = '0.1.0'
-mainClassName = 'org.aph.braillezephyr.Main'
-ext.moduleName = 'org.aph.braillezephyr'
-
-/* Older versions of SWT under the groupId 'org.eclipse.swt' do not have:
- *    Automatic-Module-Name: org.eclipse.swt
- * in the jar manifest file and osgi platform names do not play well with java
- * automatic modules names.  So they were copied into the 'build/dependencies/'
- * directory and renamed to 'org.eclipse.swt.jar'.  These are version 4.+
- *
- * Newer versions of SWT under the groupId 'org.eclipse.platform' do have an
- * automatic module name in the jar manifest file, but also have a
- * ${osgi.platform} dependency that gradle cannot seem to handle, requiring
- * module substitution.  These are version 3.+
- */
-String swtVersion = '3.+'
-
-String swtName
-switch(System.getProperty('os.name').toLowerCase().split()[0])
-{
-case 'mac':
-
-	swtName = 'org.eclipse.swt.cocoa.macosx.x86_64'
-	applicationDefaultJvmArgs.add('-XstartOnFirstThread')
-	break
-
-case 'windows':
-
-	swtName = 'org.eclipse.swt.win32.win32.x86_64'
-	new File(project.getBuildDir().getPath() + '\\AppData\\Local\\BrailleZephyr\\' + version).mkdirs()
-	break
-
-case 'linux':
-default:
-
-	swtName = 'org.eclipse.swt.gtk.linux.x86_64'
-	new File(project.getBuildDir().getPath() + '/.config/BrailleZephyr/').mkdirs()
-	break
-}
-
-repositories {
-	mavenLocal()
-	mavenCentral()
-}
-
-configurations {
-	swtModulize
-}
-
-//   deal with ${osgi.platform}
-configurations.all {
-	resolutionStrategy {
-		dependencySubstitution {
-			substitute module('org.eclipse.platform:org.eclipse.swt.${osgi.platform}') with module("org.eclipse.platform:$swtName:$swtVersion")
-		}
-	}
-}
-
-dependencies {
-	//	implementation group: 'org.eclipse.platform', name: swtName, version: swtVersion   // or name:  'org.eclipse.swt'?
-	implementation files("build/dependencies/org.eclipse.swt.jar")
-	swtModulize group: 'org.eclipse.platform', name: swtName, version: swtVersion
-	swtModulize group: 'org.eclipse.platform', name: swtName, version: swtVersion, classifier: 'sources'
-	swtModulize group: 'org.eclipse.platform', name: swtName, version: swtVersion, classifier: 'javadoc'
-
-	archives group: 'org.eclipse.platform', name: swtName, version: swtVersion
-	//	archives files("build/dependencies/org.eclipse.swt.jar")
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17) // Explicitly set Java 17
+    }
 }
 
 compileJava {
-	inputs.property("moduleName", moduleName)
-	doFirst {
-		options.compilerArgs = [
-			'--module-path', classpath.asPath,
-			'-encoding', 'utf8'
-		]
-		classpath = files()
-
-		copy {
-			from configurations.swtModulize
-			into 'build/tmp/swt'
-		}
-
-		copy {
-			from 'build/tmp/swt'
-			include 'org.*.swt.*.jar'
-			into 'build/dependencies'
-			rename 'org.*.swt.*[0-9].jar', 'org.eclipse.swt.jar'
-			rename 'org.*.swt.*[0-9]-sources.jar', 'org.eclipse.swt-sources.jar'
-			rename 'org.*.swt.*[0-9]-javadoc.jar', 'org.eclipse.swt-javadoc.jar'
-		}
-	}
-
-	String[] lines = file('src/main/java/module-info.java') as String[]
-	boolean hasSWTModuleName = false;
-	for(line in lines)
-		if(line.contains(swtName))
-		{
-			hasSWTModuleName = true;
-			break;
-		}
-	if(!hasSWTModuleName)
-	{
-		println "writing module-info.java"
-		new File('src/main/java', 'module-info.java').text = """module org.aph.braillezephyr {
-	exports org.aph.braillezephyr;
-	requires java.desktop;
-	requires $swtName;
-}
-"""
-	}
-
-	doLast {
-		new File(buildDir, "version.txt").text = version
-		new File(buildDir, "build-time.txt").text = new Date()
-	}
+    options.release = 17
 }
 
-jar {
-	manifest {
-		attributes (
-			'Main-Class': mainClassName,
-			'Implementation-Name': System.getProperty('os.name'),
-			'Implementation-Version': version,
-			'Implementation-Vender': 'American Printing House for the Blind',
-			'Implementation-URL': 'www.aph.org'
-		)
-	}
+group = "org.aph.braillezephyr"
+version = "1.0"
+
+publishing {
+    publications {
+        brailleZephyr(MavenPublication) {
+            from(components.java)
+        }
+    }
 }
 
-jlink {
-	options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
-	launcher{
-		name = 'BrailleZephyr'
-	}
+application {
+    mainClass = "org.aph.braillezephyr.Main"
 }
 
+String swtOS
+switch (JnaPlatform.getOSType()) {
+    case JnaPlatform.WINDOWS:
+        swtOS = "win32.win32"
+        break
+    case JnaPlatform.MAC:
+        swtOS = "cocoa.macosx"
+        break
+    case JnaPlatform.LINUX:
+        swtOS = "gtk.linux"
+        break
+    default:
+        throw new RuntimeException("Unsupported OS")
+}
+String swtArch
+if (JnaPlatform.isIntel()) {
+    swtArch = JnaPlatform.is64Bit() ? "x86_64" : "x86"
+} else if (JnaPlatform.isARM() && JnaPlatform.is64Bit()) {
+    swtArch = "aarch64"
+} else {
+    throw new RuntimeException("Unsupported architecture")
+}
+
+String swtVersion = "3.124.+"
+String swtPlatform = "${swtOS}.${swtArch}"
+if (JnaPlatform.isMac()) {
+    application.applicationDefaultJvmArgs.add("-XstartOnFirstThread")
+}
+
+configurations.configureEach {
+    resolutionStrategy {
+        dependencySubstitution {
+            substitute module("org.eclipse.platform:org.eclipse.swt.\${osgi.platform}") using module("org.eclipse.platform:org.eclipse.swt.${swtPlatform}:${swtVersion}")
+        }
+    }
+}
+
+dependencies {
+    implementation("org.eclipse.platform:org.eclipse.swt:${swtVersion}") // Verify compatibility with Java 17
+}
+
+ext.defaultManifest = java.manifest {
+    attributes("Main-Class": application.mainClass,
+            "Implementation-Version": version)
+}
+
+tasks.jar {
+    manifest = project.java.manifest {
+        from(defaultManifest)
+    }
+
+    archiveBaseName = "BrailleZephyr"
+}
+
+tasks.register("copyDependencies", Copy) {
+    from(configurations.runtimeClasspath)
+    into("${layout.buildDirectory.get()}/jpackage-app")
+}
+
+tasks.register("copyJar", Copy) {
+    from(tasks.jar)
+    into("${layout.buildDirectory.get()}/jpackage-app")
+}
+
+tasks.jpackage {
+    dependsOn("build", "copyDependencies", "copyJar")
+    verbose = true
+    input = "${layout.buildDirectory.get()}/jpackage-app"
+    destination = "${layout.buildDirectory.get()}/dist"
+    appName = "BrailleZephyr"
+    appVersion = version
+    vendor = "American Printing House for the Blind"
+    mainJar = tasks.jar.archiveFileName.get()
+    mainClass = application.mainClass.get()
+    javaOptions = application.applicationDefaultJvmArgs.asList()
+    addModules = ["java.desktop"]
+    windows {
+        winDirChooser = true
+        winMenu = true
+        winShortcut = true
+        winShortcutPrompt = true
+        winConsole = false
+    }
+    mac {
+        type = ImageType.APP_IMAGE
+        macAppStore = false
+        macPackageIdentifier = "org.aph.BrailleZephyr"
+        macPackageName = "BrailleZephyr"
+        macSign = false
+    }
+}
 run {
-	systemProperties['braillezephyr.version'] = version
+    systemProperties["braillezephyr.version"] = version
 }
 
-task fullJar(type : Jar) {
-
-	manifest {
-		attributes (
-			'Main-Class': mainClassName,
-			'Implementation-Name': 'BrailleZephyr ' + System.getProperty('os.name'),
-			'Implementation-Version': version,
-			'Implementation-Vender': 'American Printing House for the Blind',
-			'Implementation-URL': 'www.aph.org'
-		)
-	}
-
-	from(configurations.archives.collect { it.isDirectory() ? it : zipTree(it) }) {
-		exclude "META-INF/*.SF"
-		exclude "META-INF/*.DSA"
-		exclude "META-INF/*.RSA"
-	}
-
-	with jar
+tasks.wrapper {
+    gradleVersion = "8.5"
 }
 
-task copyDeps(type: Copy) {
-	from configurations.archives
-	into 'build/deps'
+repositories {
+    mavenCentral()
 }
